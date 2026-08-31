@@ -7,92 +7,75 @@ import { sendInteractive } from '../../lib/sendInteractive.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// --------------------------------------------------
-// CUSTOM BUTTON STORAGE
-// --------------------------------------------------
-
 const getButtonsFile = () => {
-    const possibleFolders = [
-        path.join(process.cwd(), 'database'),
-        path.join(__dirname, '../../database'),
-        path.join(__dirname, '../../../database')
+    const possiblePaths = [
+        path.join(process.cwd(), 'database', 'custom_buttons.json'),
+        path.join(__dirname, '../../database/custom_buttons.json'),
+        path.join(__dirname, '../../../database/custom_buttons.json')
     ];
 
-    let databaseFolder = possibleFolders.find(folder => fs.existsSync(folder));
+    for (const filePath of possiblePaths) {
+        const folder = path.dirname(filePath);
 
-    if (!databaseFolder) {
-        databaseFolder = path.join(process.cwd(), 'database');
-        fs.mkdirSync(databaseFolder, { recursive: true });
+        if (fs.existsSync(folder)) {
+            return filePath;
+        }
     }
 
-    return path.join(databaseFolder, 'custom_buttons.json');
-};
+    const fallback = path.join(process.cwd(), 'database', 'custom_buttons.json');
+    fs.mkdirSync(path.dirname(fallback), { recursive: true });
 
-const ensureButtonsFile = () => {
-    const file = getButtonsFile();
-
-    if (!fs.existsSync(file)) {
-        fs.writeFileSync(file, '[]', 'utf8');
-    }
-
-    return file;
+    return fallback;
 };
 
 const loadButtons = () => {
     try {
-        const file = ensureButtonsFile();
-        const data = fs.readFileSync(file, 'utf8');
+        const file = getButtonsFile();
 
-        if (!data.trim()) return [];
+        if (!fs.existsSync(file)) {
+            fs.writeFileSync(file, JSON.stringify([], null, 2));
+            return [];
+        }
+
+        const data = fs.readFileSync(file, 'utf8').trim();
+
+        if (!data) return [];
 
         const buttons = JSON.parse(data);
 
         return Array.isArray(buttons) ? buttons : [];
     } catch (error) {
-        console.error('Custom buttons load error:', error);
+        console.error('Load custom buttons error:', error);
         return [];
     }
 };
 
 const saveButtons = (buttons) => {
-    try {
-        const file = ensureButtonsFile();
+    const file = getButtonsFile();
 
-        fs.writeFileSync(
-            file,
-            JSON.stringify(buttons, null, 2),
-            'utf8'
-        );
+    fs.mkdirSync(path.dirname(file), { recursive: true });
 
-        return true;
-    } catch (error) {
-        console.error('Custom buttons save error:', error);
-        return false;
-    }
+    fs.writeFileSync(
+        file,
+        JSON.stringify(buttons, null, 2),
+        'utf8'
+    );
 };
 
-// --------------------------------------------------
-// COMMAND
-// --------------------------------------------------
+export const getCustomButtons = () => {
+    return loadButtons();
+};
 
 export default {
     name: 'addbutton',
-
-    aliases: [
-        'addbtn',
-        'buttonadd'
-    ],
+    aliases: ['addbtn'],
 
     description: 'Adds a custom button to the menu',
 
     run: async (context) => {
-        const { client, m, args, prefix } = context;
+        const { client, m, args, prefix = '.' } = context;
 
         try {
-            // ------------------------------------------
-            // HELP
-            // ------------------------------------------
-
             if (!args || args.length < 2) {
                 await client.sendMessage(m.chat, {
                     react: {
@@ -104,51 +87,37 @@ export default {
                 await sendInteractive(
                     client,
                     m,
-                    `╭─❏ 「 𝐀𝐃𝐃 𝐁𝐔𝐓𝐓𝐎𝐍 」
-│
-│ Usage:
-│ ${prefix}addbutton <name> <command>
-│
-│ Example:
-│ ${prefix}addbutton test menu
-│
-│ This creates:
-│ test → menu
-│
-│ Remove:
-│ ${prefix}delbutton test
-│
-│ List:
-│ ${prefix}buttons
-│
-╰───────────────
-> ©️𝐏𝐨𝐰𝐞𝐫𝐞𝐝 𝐆𝐞𝐬𝐭𝐨𝐧 𝐓𝐞𝐜𝐡`
+                    `╭─❏ 「 Uѕᴀɢᴇ 」\n` +
+                    `│\n` +
+                    `│ ${prefix}addbutton <button_name> <command>\n` +
+                    `│\n` +
+                    `│ Example:\n` +
+                    `│ ${prefix}addbutton test menu\n` +
+                    `│\n` +
+                    `╰───────────────\n` +
+                    `> ©️𝐏𝐨𝐰𝐞𝐫𝐞𝐝 𝐆𝐞𝐬𝐭𝐨𝐧 𝐓𝐞𝐜𝐡`
                 );
 
                 return;
             }
 
-            // ------------------------------------------
-            // GET ARGUMENTS
-            // ------------------------------------------
+            let buttonName = args[0].trim();
+            let command = args[1].trim();
 
-            const buttonName = args[0].trim();
-            const command = args[1].trim();
+            // Remove prefix if the user writes .menu instead of menu
+            command = command.replace(/^[.!#/]+/, '');
 
             if (!buttonName || !command) {
-                return;
+                throw new Error('Invalid button name or command');
             }
 
-            // ------------------------------------------
-            // LOAD EXISTING BUTTONS
-            // ------------------------------------------
+            // Avoid excessively long values
+            buttonName = buttonName.slice(0, 50);
+            command = command.slice(0, 50);
 
             const buttons = loadButtons();
 
-            // ------------------------------------------
-            // CHECK DUPLICATE
-            // ------------------------------------------
-
+            // Check whether the button already exists
             const existingIndex = buttons.findIndex(
                 button =>
                     button.name.toLowerCase() === buttonName.toLowerCase()
@@ -160,40 +129,13 @@ export default {
                 createdAt: new Date().toISOString()
             };
 
-            // ------------------------------------------
-            // UPDATE EXISTING BUTTON
-            // ------------------------------------------
-
             if (existingIndex !== -1) {
-                buttons[existingIndex] = {
-                    ...buttons[existingIndex],
-                    name: buttonName,
-                    command: command,
-                    updatedAt: new Date().toISOString()
-                };
-            }
-
-            // ------------------------------------------
-            // ADD NEW BUTTON
-            // ------------------------------------------
-
-            else {
+                buttons[existingIndex] = newButton;
+            } else {
                 buttons.push(newButton);
             }
 
-            // ------------------------------------------
-            // SAVE
-            // ------------------------------------------
-
-            const saved = saveButtons(buttons);
-
-            if (!saved) {
-                throw new Error('Unable to save custom button');
-            }
-
-            // ------------------------------------------
-            // SUCCESS REACTION
-            // ------------------------------------------
+            saveButtons(buttons);
 
             await client.sendMessage(m.chat, {
                 react: {
@@ -202,30 +144,22 @@ export default {
                 }
             }).catch(() => {});
 
-            // ------------------------------------------
-            // SUCCESS MESSAGE
-            // ------------------------------------------
-
             await sendInteractive(
                 client,
                 m,
-                `╭─❏ 「 𝐁𝐔𝐓𝐓𝐎𝐍 𝐀𝐃𝐃𝐄𝐃 」
-│
-│ Name: ${buttonName}
-│ Command: ${command}
-│
-│ ${existingIndex !== -1
-                    ? 'Button updated successfully.'
-                    : 'Button saved successfully.'}
-│
-│ It will now appear in:
-│ ${prefix}menu
-│
-╰───────────────
-> ©️𝐏𝐨𝐰𝐞𝐫𝐞𝐝 𝐆𝐞𝐬𝐭𝐨𝐧 𝐓𝐞𝐜𝐡`
+                `╭─❏ 「 Bᴜᴛᴛᴏɴ Sᴀᴠᴇᴅ 」\n` +
+                `│\n` +
+                `│ Name: ${buttonName}\n` +
+                `│ Command: ${prefix}${command}\n` +
+                `│\n` +
+                `│ ${existingIndex !== -1 ? 'Button updated successfully.' : 'Button added successfully.'}\n` +
+                `│\n` +
+                `╰───────────────\n` +
+                `> ©️𝐏𝐨𝐰ᴇʀᴇᴅ 𝐆𝐞𝐬ᴛᴏɴ 𝐓ᴇᴄʜ`
             );
 
         } catch (error) {
+            console.error(`AddButton error: ${error.stack || error}`);
 
             await client.sendMessage(m.chat, {
                 react: {
@@ -234,21 +168,17 @@ export default {
                 }
             }).catch(() => {});
 
-            console.error(
-                `AddButton error: ${error.stack || error}`
-            );
-
             await sendInteractive(
                 client,
                 m,
-                `╭─❏ 「 𝐄𝐑𝐑𝐎𝐑 」
-│
-│ Error adding custom button.
-│
-│ ${error.message || 'Unknown error'}
-│
-╰───────────────
-> ©️𝐏𝐨𝐰𝐞𝐫𝐞𝐝 𝐆𝐞𝐬𝐭𝐨𝐧 𝐓𝐞𝐜𝐡`
+                `╭─❏ 「 Eʀʀᴏʀ 」\n` +
+                `│\n` +
+                `│ Error adding custom button.\n` +
+                `│\n` +
+                `│ ${error.message || 'Unknown error'}\n` +
+                `│\n` +
+                `╰───────────────\n` +
+                `> ©️𝐏𝐨ᴡᴇʀᴇᴅ 𝐆ᴇsᴛᴏɴ 𝐓ᴇᴄʜ`
             ).catch(() => {});
         }
     }
